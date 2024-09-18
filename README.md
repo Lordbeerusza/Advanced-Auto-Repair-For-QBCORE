@@ -1,5 +1,11 @@
 !Lordbeerusza First FiveM Server Script
 
+### Minor changes
+1. When player leave repair radius while repairing, it cancels out
+2. If A Player accidently tap E while in the repair radius, Vehicle is fully healthy(Fully Repaired)
+   the user will receive a notification saying vehicle is in perfect condition and cancel repair. 
+
+
 # qb-auto-repair (1.0.1)_ 
 
 A simple but advanced auto repair system for **FiveM** with support for the **QBCore Framework Servers**.
