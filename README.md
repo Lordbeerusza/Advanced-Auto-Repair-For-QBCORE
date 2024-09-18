@@ -24,7 +24,7 @@ if you have a standalone progressbar, change dependencies from qb-progressbar to
 
 ### Step 3:
 
-Run your server and test the script, if you want you change the repair locations in config.lua 
+Run your server and test the script, if you want to change the repair locations in config.lua 
 <br> <br>
 ![step 3](https://cdn.discordapp.com/attachments/1282741191305334953/1285955698622074920/image.png?ex=66ec2712&is=66ead592&hm=542f8b38ec85469e124e766605d855b5898342bfd212b6057c00fa36d7f5565b&)
 
