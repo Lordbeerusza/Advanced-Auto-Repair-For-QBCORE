@@ -3,11 +3,13 @@ local QBCore = exports['qb-core']:GetCoreObject()
 
 -- Initialize repair status
 local isRepairing = false
+local repairThread = nil -- Thread to handle repair progress
 
 -- Function to check if any window is broken
 function checkWindows(vehicle)
     for i = 0, 7 do
         if not IsVehicleWindowIntact(vehicle, i) then
+            print("Window broken detected: ", i)
             return true
         end
     end
@@ -18,6 +20,7 @@ end
 function checkTires(vehicle)
     for i = 0, 5 do
         if IsVehicleTyreBurst(vehicle, i, false) then
+            print("Tire burst detected: ", i)
             return true
         end
     end
@@ -28,8 +31,9 @@ end
 function checkLights(vehicle)
     local headlightBone = GetEntityBoneIndexByName(vehicle, "headlight_l")
     local taillightBone = GetEntityBoneIndexByName(vehicle, "taillight_l")
-    
+
     if headlightBone == -1 or taillightBone == -1 then
+        print("Light broken detected")
         return true
     end
     return false
@@ -38,12 +42,40 @@ end
 -- Function to check the body health of the vehicle
 function checkBodyDamage(vehicle)
     local bodyHealth = GetVehicleBodyHealth(vehicle)
-    
+    print("Vehicle body health: ", bodyHealth)
     if bodyHealth < Config.MaxBodyHealth then
         return true
     end
     return false
 end
+
+-- Function to check the engine health of the vehicle
+function checkEngineDamage(vehicle)
+    local engineHealth = GetVehicleEngineHealth(vehicle)
+    print("Vehicle engine health: ", engineHealth)
+    if engineHealth < Config.MaxEngineHealth then
+        return true
+    end
+    return false
+end
+
+-- Function to check if the vehicle is fully healthy
+function isVehicleFullyHealthy(vehicle)
+    local engineHealthy = not checkEngineDamage(vehicle)
+    local bodyHealthy = not checkBodyDamage(vehicle)
+    -- Removed windowsIntact check
+    local tiresIntact = not checkTires(vehicle)
+    local lightsIntact = not checkLights(vehicle)
+
+    print("Engine Healthy: ", engineHealthy)
+    print("Body Healthy: ", bodyHealthy)
+    -- Removed window debug print
+    print("Tires Intact: ", tiresIntact)
+    print("Lights Intact: ", lightsIntact)
+
+    return engineHealthy and bodyHealthy and tiresIntact and lightsIntact
+end
+
 
 -- Function to calculate the repair cost based on damage
 function calculateRepairCost(vehicle)
@@ -54,7 +86,7 @@ function calculateRepairCost(vehicle)
     local bodyDamagePercent = (Config.MaxBodyHealth - bodyHealth) / Config.MaxBodyHealth
 
     local repairCost = math.ceil((engineDamagePercent + bodyDamagePercent) * Config.CostMultiplier)
-    
+
     return repairCost
 end
 
@@ -69,40 +101,54 @@ function isNearRepairLocation(playerCoords)
     return false, nil
 end
 
--- Function to display a custom progress bar
-function startProgressBar(repairCost)
+-- Function to display a custom progress bar and handle repair
+function startProgressBar(repairCost, vehicle)
     local startTime = GetGameTimer()
     local duration = 5000 -- Duration in milliseconds
 
-    while GetGameTimer() - startTime < duration do
-        Citizen.Wait(0)
+    repairThread = Citizen.CreateThread(function()
+        while GetGameTimer() - startTime < duration do
+            Citizen.Wait(0)
 
-        -- Calculate progress
-        local progress = (GetGameTimer() - startTime) / duration
-        local barWidth = 0.2  -- Width halved
-        local barHeight = 0.01 -- Height halved
-        local x = 0.5
-        local y = 0.9
+            -- Cancel repair if player leaves the repair radius
+            local playerPed = PlayerPedId()
+            local playerCoords = GetEntityCoords(playerPed)
+            local isNear, _ = isNearRepairLocation(playerCoords)
 
-        -- Draw the black outline (slightly larger than the progress bar but smaller than before)
-        DrawRect(x, y, barWidth + 0.015, barHeight + 0.015, 0, 0, 0, 200) -- Smaller outline
+            if not isNear then
+                isRepairing = false
+                QBCore.Functions.Notify("Repair canceled as you left the repair area.", "error")
+                return -- Exit the thread
+            end
 
-        -- Draw the background
-        DrawRect(x, y, barWidth, barHeight, 0, 0, 0, 150) -- Black background
+            -- Calculate progress
+            local progress = (GetGameTimer() - startTime) / duration
+            local barWidth = 0.2
+            local barHeight = 0.01
+            local x = 0.5
+            local y = 0.9
 
-        -- Draw the progress
-        DrawRect(x - (barWidth / 2) + (barWidth * progress / 2), y, barWidth * progress, barHeight, 255, 0, 0, 150) -- Red progress
-    end
+            -- Draw the black outline (slightly larger than the progress bar)
+            DrawRect(x, y, barWidth + 0.015, barHeight + 0.015, 0, 0, 0, 200)
 
-    -- Complete progress
-    TriggerServerEvent('qb-auto-repair:repairVehicle', repairCost)
-    QBCore.Functions.Notify("Vehicle repaired successfully!", "success")
+            -- Draw the background
+            DrawRect(x, y, barWidth, barHeight, 0, 0, 0, 150)
+
+            -- Draw the progress
+            DrawRect(x - (barWidth / 2) + (barWidth * progress / 2), y, barWidth * progress, barHeight, 255, 0, 0, 150)
+        end
+
+        -- Complete progress
+        TriggerServerEvent('qb-auto-repair:repairVehicle', repairCost)
+        QBCore.Functions.Notify("Vehicle repaired successfully!", "success")
+        isRepairing = false
+    end)
 end
 
 -- Main logic thread
 Citizen.CreateThread(function()
     while true do
-        Citizen.Wait(0)  -- Short wait for responsiveness
+        Citizen.Wait(0)
 
         local playerPed = PlayerPedId()
         local playerCoords = GetEntityCoords(playerPed)
@@ -113,22 +159,17 @@ Citizen.CreateThread(function()
             QBCore.Functions.DrawText3D(repairCoords.x, repairCoords.y, repairCoords.z, "[E] Repair Vehicle")
 
             if IsControlJustReleased(0, 38) then
-                local windowBroken = checkWindows(vehicle)
-                local tireBurst = checkTires(vehicle)
-                local lightBroken = checkLights(vehicle)
-                local bodyDamaged = checkBodyDamage(vehicle)
-                
-                local repairCost = calculateRepairCost(vehicle)
-                
-                if windowBroken or tireBurst or lightBroken or bodyDamaged then
+                if not isVehicleFullyHealthy(vehicle) then
+                    local repairCost = calculateRepairCost(vehicle)
                     isRepairing = true
-                    startProgressBar(repairCost)
+                    startProgressBar(repairCost, vehicle)
                 else
                     QBCore.Functions.Notify('Your vehicle is already in perfect condition!', 'error')
                 end
             end
         elseif isRepairing and not isNear then
             isRepairing = false
+            QBCore.Functions.Notify("Repair canceled as you left the repair area.", "error")
         end
     end
 end)
